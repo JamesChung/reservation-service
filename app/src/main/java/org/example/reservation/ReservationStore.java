@@ -22,9 +22,10 @@ import java.util.List;
  *   <li><b>Fencing.</b> Each grant has a unique {@link LeaseToken}. {@link #release} and
  *       {@link #extend} apply only to that generation. After expiry, the same id may be
  *       granted again with a new token; a delayed release of the old token is a no-op.</li>
- *   <li><b>Idempotent grant.</b> Same id, scope, and vector while held returns the existing
- *       reservation (same token, same owner, original expiry). Owner is not updated.
- *       Same id with a different scope or vector is {@link ReservationConflict}.</li>
+ *   <li><b>Idempotent grant.</b> Same id and vector <em>in the same scope</em> while held
+ *       returns the existing reservation (same token, same owner, original expiry). Owner
+ *       is not updated. Same id with a different vector in that scope is
+ *       {@link ReservationConflict}. Ids are unique per scope, not globally (cluster-safe).</li>
  *   <li><b>Release.</b> {@code Success(true)} if this token’s generation was held and is now
  *       released. {@code Success(false)} if unknown, expired, or wrong token.</li>
  *   <li><b>Extend.</b> Wrong/expired token is {@link StaleLease}, not a silent no-op.</li>

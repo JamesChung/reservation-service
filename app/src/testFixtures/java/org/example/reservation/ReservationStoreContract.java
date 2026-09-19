@@ -15,17 +15,23 @@ import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 public abstract class ReservationStoreContract {
 
-    static final ResourceName RUNS = new ResourceName("pipeline.runs");
-    static final ResourceName CPU = new ResourceName("cpu.millis");
-    static final ResourceName MEM = new ResourceName("memory.bytes");
-    static final Owner SCHEDULER_A = new Owner("scheduler-a");
-    static final Owner SCHEDULER_B = new Owner("scheduler-b");
+    protected static final ResourceName RUNS = new ResourceName("pipeline.runs");
+    protected static final ResourceName CPU = new ResourceName("cpu.millis");
+    protected static final ResourceName MEM = new ResourceName("memory.bytes");
+    protected static final Owner SCHEDULER_A = new Owner("scheduler-a");
+    protected static final Owner SCHEDULER_B = new Owner("scheduler-b");
 
     protected abstract ReservationStore createStore(Clock clock);
+
+    /** Valkey uses server time; clock-injection tests are skipped there. */
+    protected boolean supportsInjectedClock() {
+        return true;
+    }
 
     private ReservationStore store() {
         return createStore(Clock.systemUTC());
@@ -110,18 +116,17 @@ public abstract class ReservationStoreContract {
     }
 
     @Test
-    void sameIdDifferentScopeIsConflict() {
+    void sameIdDifferentScopeIsAllowed() {
         ReservationStore store = store();
         Scope acme = Scope.tenant("acme");
         Scope globex = Scope.tenant("globex");
         assertOk(store.replaceQuotas(acme, ResourceVector.of(RUNS, 1)));
         assertOk(store.replaceQuotas(globex, ResourceVector.of(RUNS, 1)));
-        Reservation first = assertGranted(store.tryReserve(request(acme, "run-1", RUNS, 1)));
-
-        ReservationConflict conflict = assertInstanceOf(
-                ReservationConflict.class, assertFailure(store.tryReserve(request(globex, "run-1", RUNS, 1))));
-        assertEquals(first.scope(), conflict.existing().scope());
-        assertGranted(store.tryReserve(request(globex, "globex-1", RUNS, 1)));
+        Reservation acmeHold = assertGranted(store.tryReserve(request(acme, "run-1", RUNS, 1)));
+        Reservation globexHold = assertGranted(store.tryReserve(request(globex, "run-1", RUNS, 1)));
+        assertEquals(acmeHold.id(), globexHold.id());
+        assertNotEquals(acmeHold.scope(), globexHold.scope());
+        assertNotEquals(acmeHold.token(), globexHold.token());
     }
 
     @Test
@@ -172,6 +177,7 @@ public abstract class ReservationStoreContract {
 
     @Test
     void expiredGenerationCannotKillReusedId() {
+        Assumptions.assumeTrue(supportsInjectedClock());
         MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         ReservationStore store = createStore(clock);
         Scope acme = Scope.tenant("acme");
@@ -211,6 +217,7 @@ public abstract class ReservationStoreContract {
 
     @Test
     void extendKeepsTokenAndRefreshesExpiry() {
+        Assumptions.assumeTrue(supportsInjectedClock());
         MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         ReservationStore store = createStore(clock);
         Scope acme = Scope.tenant("acme");
@@ -305,21 +312,21 @@ public abstract class ReservationStoreContract {
         assertEquals(quotas, assertSuccess(store.quotas(acme)));
     }
 
-    private static Reservation assertGranted(Try<Reservation> result) {
+    protected static Reservation assertGranted(Try<Reservation> result) {
         return assertSuccess(result);
     }
 
-    private static Denied assertDenied(Try<Reservation> result) {
+    protected static Denied assertDenied(Try<Reservation> result) {
         return assertInstanceOf(Denied.class, assertFailure(result));
     }
 
-    private static void assertOk(Try<Void> result) {
+    protected static void assertOk(Try<Void> result) {
         if (result.isFailure()) {
             fail("expected ok but was " + result);
         }
     }
 
-    private static <T> T assertSuccess(Try<T> result) {
+    protected static <T> T assertSuccess(Try<T> result) {
         if (result instanceof Try.Success<T> success) {
             return success.value();
         }
@@ -327,7 +334,7 @@ public abstract class ReservationStoreContract {
         return null;
     }
 
-    private static Throwable assertFailure(Try<?> result) {
+    protected static Throwable assertFailure(Try<?> result) {
         if (result instanceof Try.Failure<?> failure) {
             return failure.cause();
         }
@@ -335,11 +342,11 @@ public abstract class ReservationStoreContract {
         return null;
     }
 
-    private static ReserveRequest request(Scope scope, String id, ResourceName name, long amount) {
+    protected static ReserveRequest request(Scope scope, String id, ResourceName name, long amount) {
         return request(scope, SCHEDULER_A, id, name, amount);
     }
 
-    private static ReserveRequest request(Scope scope, Owner owner, String id, ResourceName name, long amount) {
+    protected static ReserveRequest request(Scope scope, Owner owner, String id, ResourceName name, long amount) {
         return new ReserveRequest(
                 new ReservationId(id), owner, scope, ResourceVector.of(name, amount), Duration.ofMinutes(10));
     }

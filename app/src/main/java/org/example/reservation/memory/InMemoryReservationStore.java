@@ -40,7 +40,6 @@ public final class InMemoryReservationStore implements ReservationStore {
 
     private final Clock clock;
     private final ReentrantLock lock = new ReentrantLock(true);
-    private final Map<ReservationId, Reservation> byId = new HashMap<>();
     private final Map<Scope, ScopeState> scopes = new HashMap<>();
 
     public InMemoryReservationStore() {
@@ -99,16 +98,15 @@ public final class InMemoryReservationStore implements ReservationStore {
         Objects.requireNonNull(request, "request");
         lock.lock();
         try {
+            ScopeState state = state(request.scope());
             sweep(request.scope());
-            Reservation existing = live(request.id());
+            Reservation existing = state.held.get(request.id());
             if (existing != null) {
-                if (existing.scope().equals(request.scope())
-                        && existing.resources().equals(request.resources())) {
+                if (existing.resources().equals(request.resources())) {
                     return Try.success(existing);
                 }
                 return Try.failure(new ReservationConflict(existing));
             }
-            ScopeState state = state(request.scope());
             Optional<Denied> rejection = rejection(state, request.resources());
             if (rejection.isPresent()) {
                 return Try.failure(rejection.get());
@@ -161,7 +159,6 @@ public final class InMemoryReservationStore implements ReservationStore {
                     current.createdAt(),
                     clock.instant().plus(ttl));
             state.held.put(current.id(), updated);
-            byId.put(current.id(), updated);
             return Try.success(updated);
         } finally {
             lock.unlock();
@@ -214,15 +211,6 @@ public final class InMemoryReservationStore implements ReservationStore {
         }
     }
 
-    private Reservation live(ReservationId id) {
-        Reservation existing = byId.get(id);
-        if (existing == null) {
-            return null;
-        }
-        sweep(existing.scope());
-        return byId.get(id);
-    }
-
     private void sweep(Scope scope) {
         ScopeState state = scopes.get(scope);
         if (state == null) {
@@ -251,13 +239,11 @@ public final class InMemoryReservationStore implements ReservationStore {
                 now,
                 now.plus(request.ttl()));
         state.held.put(reservation.id(), reservation);
-        byId.put(reservation.id(), reservation);
         return reservation;
     }
 
     private void removeHeld(ScopeState state, Reservation reservation) {
         state.held.remove(reservation.id(), reservation);
-        byId.remove(reservation.id(), reservation);
     }
 
     private Optional<Denied> rejection(ScopeState state, ResourceVector demand) {

@@ -1,0 +1,59 @@
+-- KEYS[1] holds hash
+-- ARGV: id, token, payloadVersion
+local holdsKey = KEYS[1]
+local id = ARGV[1]
+local token = ARGV[2]
+local currentV = tonumber(ARGV[3])
+
+local t = redis.call('TIME')
+local nowMs = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+
+local function decode_hold(raw)
+  local ok, obj = pcall(cjson.decode, raw)
+  if not ok or type(obj) ~= 'table' then
+    return nil
+  end
+  return obj
+end
+
+local function hold_v(obj)
+  if obj['v'] == nil then
+    return 1
+  end
+  return tonumber(obj['v'])
+end
+
+local function readable(obj)
+  local v = hold_v(obj)
+  return v ~= nil and v <= currentV
+end
+
+local function expired(obj)
+  local exp = tonumber(obj['expiresAt'])
+  return exp ~= nil and exp <= nowMs
+end
+
+local entries = redis.call('HGETALL', holdsKey)
+for i = 1, #entries, 2 do
+  local obj = decode_hold(entries[i + 1])
+  if obj and readable(obj) and expired(obj) then
+    redis.call('HDEL', holdsKey, entries[i])
+  end
+end
+
+local existing = redis.call('HGET', holdsKey, id)
+if not existing then
+  return 'FALSE'
+end
+local obj = decode_hold(existing)
+if not obj then
+  return 'FALSE'
+end
+if not readable(obj) then
+  return 'UNSUPPORTED'
+end
+if obj['token'] ~= token then
+  return 'FALSE'
+end
+redis.call('HDEL', holdsKey, id)
+return 'TRUE'
