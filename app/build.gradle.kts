@@ -18,6 +18,10 @@ sourceSets {
         compileClasspath += sourceSets["main"].output + sourceSets["testFixtures"].output
         runtimeClasspath += output + compileClasspath
     }
+    create("sample") {
+        compileClasspath += sourceSets["main"].output
+        runtimeClasspath += output + compileClasspath
+    }
 }
 
 configurations.named("integrationTestImplementation") {
@@ -25,6 +29,12 @@ configurations.named("integrationTestImplementation") {
 }
 configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
+}
+configurations.named("sampleImplementation") {
+    extendsFrom(configurations.implementation.get())
+}
+configurations.named("sampleRuntimeOnly") {
+    extendsFrom(configurations.runtimeOnly.get())
 }
 
 dependencies {
@@ -41,6 +51,14 @@ dependencies {
 
 application {
     mainClass = "org.example.App"
+}
+
+tasks.register<JavaExec>("runPipelineSample") {
+    group = "application"
+    description = "Simulate pipelinesv1 (Jenkins) and pipelinesv2 (K8s) runs."
+    val sample = sourceSets["sample"]
+    classpath = sample.runtimeClasspath
+    mainClass.set("org.example.reservation.sample.PipelineSimulation")
 }
 
 tasks.named<Test>("test") {
